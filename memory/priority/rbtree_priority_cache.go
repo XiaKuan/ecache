@@ -21,8 +21,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ecodeclub/ekit/queue"
-
 	"github.com/ecodeclub/ecache"
 	"github.com/ecodeclub/ecache/internal/errs"
 	"github.com/ecodeclub/ekit/bean/option"
@@ -41,14 +39,13 @@ var (
 )
 
 type RBTreePriorityCache struct {
-	globalLock      *sync.RWMutex                          //内部全局读写锁，保护缓存数据和优先级数据
-	cacheData       *tree.RBTree[string, *rbTreeCacheNode] //缓存数据
-	cacheNum        int                                    //缓存中总键值对数量
-	cacheLimit      int                                    //键值对数量限制，默认MaxInt32，约等于没有限制
-	priorityData    *queue.PriorityQueue[*rbTreeCacheNode] //优先级数据
-	priorityList    *list.SkipList[*rbTreeCacheNode]       // skipList结构保存作为优先级数据
-	defaultPriority int                                    //默认优先级
-	cleanInterval   time.Duration
+	globalLock       *sync.RWMutex                          //内部全局读写锁，保护缓存数据和优先级数据
+	cacheData        *tree.RBTree[string, *rbTreeCacheNode] //缓存数据
+	cacheNum         int                                    //缓存中总键值对数量
+	cacheLimit       int                                    //键值对数量限制，默认MaxInt32，约等于没有限制
+	prioritySkipList *list.SkipList[*rbTreeCacheNode]       // skipList结构保存作为优先级数据
+	defaultPriority  int                                    //默认优先级
+	cleanInterval    time.Duration
 	// 集合类型的值的初始化容量
 	collectionCap int
 }
@@ -63,16 +60,15 @@ func newRBTreePriorityCache(opts ...option.Option[RBTreePriorityCache]) (*RBTree
 	rbTree, _ := tree.NewRBTree[string, *rbTreeCacheNode](comparatorRBTreeCacheNodeByKey())
 
 	const (
-		priorityQueueDefaultSize = 8 //优先级队列的初始大小
-		collectionDefaultCap     = 8 //缓存结点中set.MapSet的初始大小
+		collectionDefaultCap = 8 //缓存结点中set.MapSet的初始大小
 	)
-	priorityQueue := queue.NewPriorityQueue[*rbTreeCacheNode](priorityQueueDefaultSize, comparatorRBTreeCacheNodeByPriority())
+	skipList := list.NewSkipList[*rbTreeCacheNode](comparatorRBTreeCacheNodeByPriority())
 	cache := &RBTreePriorityCache{
-		globalLock:   &sync.RWMutex{},
-		cacheData:    rbTree,
-		cacheNum:     0,
-		cacheLimit:   math.MaxInt32,
-		priorityData: priorityQueue,
+		globalLock:       &sync.RWMutex{},
+		cacheData:        rbTree,
+		cacheNum:         0,
+		cacheLimit:       math.MaxInt32,
+		prioritySkipList: skipList,
 		// 暂时设置为一秒间隔
 		cleanInterval: time.Second,
 		collectionCap: collectionDefaultCap,
@@ -407,15 +403,12 @@ func (r *RBTreePriorityCache) calculatePriority(node *rbTreeCacheNode) int {
 // addNodeToPriority 把缓存结点添加到优先级数据中去
 func (r *RBTreePriorityCache) addNodeToPriority(node *rbTreeCacheNode) {
 	node.priority = r.calculatePriority(node)
-	_ = r.priorityData.Enqueue(node)
+	r.prioritySkipList.Insert(node)
 }
 
 // deleteNodeFromPriority 从优先级数据中移除缓存结点
 func (r *RBTreePriorityCache) deleteNodeFromPriority(node *rbTreeCacheNode) {
-	//优先级队列无法随机删除结点
-	//这里的方案是把优先级数据中的缓存结点置空，并标记为已删除
-	//等到触发淘汰的时候再处理
-	node.truncate()
+	r.prioritySkipList.DeleteElement(node)
 }
 
 // isFull 键值对数量满了没有
@@ -438,21 +431,16 @@ func (r *RBTreePriorityCache) findOrCreateNode(key string, initFunc func() any) 
 
 // deleteNodeByPriority 根据优先级淘汰缓存结点【调用该方法必须先获得锁】
 func (r *RBTreePriorityCache) deleteNodeByPriority() {
-	for {
-		//这里需要循环，因为有的优先级结点是空的
-		topNode, topErr := r.priorityData.Dequeue()
-		if topErr != nil {
-			return //走这里铁有bug，不可能缓存满了但是优先级队列是空的
-		}
-		if topNode.isDeleted {
-			continue //空结点，直接回去，继续下一轮
-		}
-		// 结点非空，删除缓存
-		r.cacheData.Delete(topNode.key)
-		r.cacheNum--
+	// todo: 目前ekit/list/skipList不支持范围获取和头尾获取，暂时采取这种方式，AsSlice()性能较差待优化
+	nodeList := r.prioritySkipList.AsSlice()
 
+	if len(nodeList) == 0 {
 		return
 	}
+	node := nodeList[0]
+	r.prioritySkipList.DeleteElement(node)
+	r.cacheData.Delete(node.key)
+	r.cacheNum--
 }
 
 // autoClean 自动清理过期缓存

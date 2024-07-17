@@ -100,14 +100,22 @@ func compareTwoRBTreeClient(src *RBTreePriorityCache, dst *RBTreePriorityCache) 
 		}
 	}
 
-	if src.priorityData.Len() != dst.priorityData.Len() {
+	if src.prioritySkipList.Len() != dst.prioritySkipList.Len() {
 		return false
 	}
 	src.globalLock.Lock()
-	srcTop, _ := src.priorityData.Peek()
+	srcEle := src.prioritySkipList.AsSlice()
+	var srcTop *rbTreeCacheNode
+	if len(srcEle) != 0 {
+		srcTop = srcEle[0]
+	}
 	src.globalLock.Unlock()
 	dst.globalLock.Lock()
-	dstTop, _ := dst.priorityData.Peek()
+	dstEle := src.prioritySkipList.AsSlice()
+	var dstTop *rbTreeCacheNode
+	if len(dstEle) != 0 {
+		dstTop = dstEle[0]
+	}
 	dst.globalLock.Unlock()
 	if srcTop == nil && dstTop == nil {
 		return true
