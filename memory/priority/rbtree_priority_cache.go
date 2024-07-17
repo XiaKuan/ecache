@@ -46,6 +46,7 @@ type RBTreePriorityCache struct {
 	cacheNum        int                                    //缓存中总键值对数量
 	cacheLimit      int                                    //键值对数量限制，默认MaxInt32，约等于没有限制
 	priorityData    *queue.PriorityQueue[*rbTreeCacheNode] //优先级数据
+	priorityList    *list.SkipList[*rbTreeCacheNode]       // skipList结构保存作为优先级数据
 	defaultPriority int                                    //默认优先级
 	cleanInterval   time.Duration
 	// 集合类型的值的初始化容量
