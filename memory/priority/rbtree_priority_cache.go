@@ -98,6 +98,7 @@ func (r *RBTreePriorityCache) Set(_ context.Context, key string, val any, expira
 	node := r.findOrCreateNode(key, func() any { return val })
 
 	node.replace(val, expiration)
+	r.tryUpdateNodePriority(node)
 	return nil
 }
 
@@ -115,6 +116,14 @@ func (r *RBTreePriorityCache) deleteNode(node *rbTreeCacheNode) {
 	r.deleteNodeFromPriority(node)
 }
 
+// tryUpdateNodePriority 更新缓存节点的优先级【调用该方法必须先获得锁】
+func (r *RBTreePriorityCache) tryUpdateNodePriority(node *rbTreeCacheNode) {
+	if node.priority != r.calculatePriority(node) {
+		r.deleteNodeFromPriority(node)
+		r.addNodeToPriority(node)
+	}
+}
+
 func (r *RBTreePriorityCache) SetNX(ctx context.Context, key string, val any, expiration time.Duration) (bool, error) {
 	r.globalLock.Lock()
 	defer r.globalLock.Unlock()
@@ -129,7 +138,7 @@ func (r *RBTreePriorityCache) SetNX(ctx context.Context, key string, val any, ex
 
 	if !node.beforeDeadline(time.Now()) {
 		node.replace(val, expiration) //过期的，key一样，直接覆盖
-
+		r.tryUpdateNodePriority(node)
 		return true, nil
 	}
 
@@ -193,6 +202,7 @@ func (r *RBTreePriorityCache) GetSet(ctx context.Context, key string, val string
 	//这里不需要判断缓存过期没有，取出旧值放入新值就完事了
 	retVal.Val = node.value
 	node.value = val
+	r.tryUpdateNodePriority(node)
 
 	return retVal
 }
@@ -313,6 +323,7 @@ func (r *RBTreePriorityCache) IncrBy(ctx context.Context, key string, value int6
 
 	newVal := nodeVal + value
 	node.value = newVal
+	r.tryUpdateNodePriority(node)
 
 	return newVal, nil
 }
@@ -334,6 +345,7 @@ func (r *RBTreePriorityCache) IncrByFloat(ctx context.Context, key string, value
 
 	newVal := nodeVal + value
 	node.value = newVal
+	r.tryUpdateNodePriority(node)
 
 	return newVal, nil
 }
@@ -383,6 +395,7 @@ func (r *RBTreePriorityCache) DecrBy(ctx context.Context, key string, value int6
 
 	newVal := nodeVal - value
 	node.value = newVal
+	r.tryUpdateNodePriority(node)
 
 	return newVal, nil
 }

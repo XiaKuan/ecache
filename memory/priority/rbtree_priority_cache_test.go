@@ -327,6 +327,36 @@ func TestRBTreePriorityCache_Set(t *testing.T) {
 				return cache
 			},
 		},
+		{
+			name: "limit 2,cache 2, update 1 to big priority, add 1,evict small node",
+			startCache: func() *RBTreePriorityCache {
+				cache, _ := NewRBTreePriorityCache(WithCacheLimit(2))
+				cache.globalLock.Lock()
+				defer cache.globalLock.Unlock()
+				cache.addNode(newKVRBTreeCacheNode("key1", testStructForPriority{priority: 1}, 0))
+				cache.addNode(newKVRBTreeCacheNode("key3", testStructForPriority{priority: 3}, 0))
+				node1 := cache.findOrCreateNode("key1", func() any { return nil })
+
+				//更新key1优先级
+				value, ok := node1.value.(testStructForPriority)
+				require.True(t, ok)
+				value.priority = 4
+				node1.value = value
+				cache.tryUpdateNodePriority(node1)
+
+				return cache
+			},
+			key:   "key2",
+			value: testStructForPriority{priority: 2},
+			wantCache: func() *RBTreePriorityCache {
+				cache, _ := NewRBTreePriorityCache(WithCacheLimit(2))
+				cache.globalLock.Lock()
+				defer cache.globalLock.Unlock()
+				cache.addNode(newKVRBTreeCacheNode("key2", testStructForPriority{priority: 2}, 0))
+				cache.addNode(newKVRBTreeCacheNode("key1", testStructForPriority{priority: 4}, 0))
+				return cache
+			},
+		},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
