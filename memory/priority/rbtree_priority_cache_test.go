@@ -357,6 +357,27 @@ func TestRBTreePriorityCache_Set(t *testing.T) {
 				return cache
 			},
 		},
+		{
+			name: "add 2, update 1 and update priority",
+			startCache: func() *RBTreePriorityCache {
+				cache, _ := NewRBTreePriorityCache(WithCacheLimit(2))
+				cache.globalLock.Lock()
+				defer cache.globalLock.Unlock()
+				cache.addNode(newKVRBTreeCacheNode("key1", testStructForPriority{priority: 1}, 0))
+				cache.addNode(newKVRBTreeCacheNode("key2", testStructForPriority{priority: 2}, 0))
+				return cache
+			},
+			key:   "key1",
+			value: testStructForPriority{priority: 3},
+			wantCache: func() *RBTreePriorityCache {
+				cache, _ := NewRBTreePriorityCache(WithCacheLimit(2))
+				cache.globalLock.Lock()
+				defer cache.globalLock.Unlock()
+				cache.addNode(newKVRBTreeCacheNode("key2", testStructForPriority{priority: 2}, 0))
+				cache.addNode(newKVRBTreeCacheNode("key1", testStructForPriority{priority: 3}, 0))
+				return cache
+			},
+		},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -502,6 +523,28 @@ func TestRBTreePriorityCache_SetNX(t *testing.T) {
 			},
 			wantBool: true,
 		},
+		{
+			name: "cache 2,add 2, expire 1, update 1",
+			startCache: func() *RBTreePriorityCache {
+				cache, _ := NewRBTreePriorityCache()
+				cache.globalLock.Lock()
+				defer cache.globalLock.Unlock()
+				cache.addNode(newKVRBTreeCacheNode("key1", testStructForPriority{priority: 1}, -time.Minute))
+				cache.addNode(newKVRBTreeCacheNode("key2", testStructForPriority{priority: 2}, 0))
+				return cache
+			},
+			key:   "key1",
+			value: testStructForPriority{priority: 3},
+			wantCache: func() *RBTreePriorityCache {
+				cache, _ := NewRBTreePriorityCache()
+				cache.globalLock.Lock()
+				defer cache.globalLock.Unlock()
+				cache.addNode(newKVRBTreeCacheNode("key1", testStructForPriority{priority: 3}, 0))
+				cache.addNode(newKVRBTreeCacheNode("key2", testStructForPriority{priority: 2}, 0))
+				return cache
+			},
+			wantBool: true,
+		},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -512,6 +555,7 @@ func TestRBTreePriorityCache_SetNX(t *testing.T) {
 				return
 			}
 			assert.Equal(t, tc.wantBool, retBool)
+			assert.Equal(t, true, compareTwoRBTreeClient(startCache, tc.wantCache()))
 		})
 	}
 }
